@@ -1,0 +1,9 @@
+def writeStreamer(input: org.apache.spark.sql.DataFrame, checkPointFolder: String, output: String) = {val query = input.writeStream.format("orc").option("checkpointLocation", checkPointFolder).option("path", output).outputMode("output").start()
+query.awaitTermination()}
+val static = spark.read.option("header","true").csv("/home/nipun/spark-3.2.1-bin-hadoop3.2/bin/Car_Insurance_Claim.csv")
+val dataSchema = static.schema
+val streaming = spark.readStream.schema(dataSchema).option("header","true").option("maxFilesPerTrigger", 1).csv("/home/nipun/spark-3.2.1-bin-hadoop3.2/bin/Test")
+val activityCounts = streaming.groupBy("INCOME").agg(avg("CREDIT_SCORE"))
+val activityQuery = activityCounts.writeStream.queryName("activity_counts100").format("console").outputMode("complete").start()
+val activityCounts1 = streaming.groupBy("DRIVING_EXPERIENCE").agg(count("OUTCOME"))
+val activityQuery1 = activityCounts1.writeStream.queryName("activity_counts10").format("console").outputMode("complete").start()
