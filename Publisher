@@ -1,0 +1,12 @@
+import requests
+import json
+import time
+import csv
+from kafka import KafkaConsumer,KafkaProducer
+producer = KafkaProducer(bootstrap_servers='localhost:9092',value_serializer=lambda v: json.dumps(v).encode('utf-8'))
+with open('10238.csv') as file:
+    reader = csv.DictReader(file, delimiter=";")
+    for row in reader:
+        print(row)
+        producer.send('10238', value=row)
+        producer.flush()
