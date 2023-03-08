@@ -1,0 +1,56 @@
+from pyspark.ml import Pipeline
+from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
+# We use the following schema
+from pyspark.sql.types import StructType,StructField,LongType, StringType,DoubleType,TimestampType
+schema = StructType([StructField("ID", StringType(),True), StructField("AGE", StringType(), True), StructField("GENDER", StringType(), True), StructField('RACE', StringType(), True), StructField("DRIVING_EXPERIENCE", StringType(), True), StructField("EDUCATION", StringType(), True), StructField("INCOME", StringType(), True), StructField("CREDIT_SCORE", DoubleType(), True),StructField("VEHICLE_OWNERSHIP", DoubleType(), True), StructField("VEHICLE_YEAR", StringType(), True), StructField("MARRIED", DoubleType(),True), StructField("CHILDREN", DoubleType(), True), StructField("POSTAL_CODE", StringType(), True), StructField("ANNUAL_MILEAGE", DoubleType(), True),StructField("VEHICLE_TYPE", StringType(), True), StructField("SPEEDING_VIOLATIONS", LongType(), True), StructField("DUIS", LongType(), True), StructField("PAST_ACCIDENTS", LongType(), True), StructField("OUTCOME", DoubleType(), True), ])
+data = "/home/sri2/spark-3.2.1-bin-hadoop3.2/bin/Car_Insurance_Claim.csv"
+df=spark.read.format('csv').option('header',True).schema(schema).load(data)
+df = df.withColumnRenamed("PAST_ACCIDENTS","label")
+df=df.na.drop("any")
+from pyspark.sql.functions import col,isnan, when, count
+df.select([count(when(isnan(c) | col(c).isNull(), c)).alias(c) for c in df.columns]).show()
+df.show()
+df.printSchema()
+df.count()
+testDF, trainDF = df.randomSplit([0.2, 0.8])
+from pyspark.ml.feature import OneHotEncoder
+from pyspark.ml.feature import MinMaxScaler
+from pyspark.ml.feature import StringIndexer
+from pyspark.ml.feature import VectorAssembler
+from pyspark.ml.feature import OneHotEncoder
+from pyspark.ml.classification import LogisticRegression
+# Create the logistic regression model
+lr =LogisticRegression(maxIter=10, regParam= 0.01)
+# We create a one hot encoder.
+idx = StringIndexer(inputCols = ['AGE', 'GENDER', 'RACE', 'DRIVING_EXPERIENCE','VEHICLE_YEAR', 'VEHICLE_TYPE','POSTAL_CODE'], outputCols=['AGE1', 'GENDER1', 'RACE1', 'DRIVING_EXPERIENCE1',  'VEHICLE_YEAR1', 'VEHICLE_TYPE1','POSTAL_CODE1'])
+ohe = OneHotEncoder(inputCols = ['AGE1', 'GENDER1', 'RACE1', 'DRIVING_EXPERIENCE1', 'VEHICLE_YEAR1', 'VEHICLE_TYPE1','POSTAL_CODE1'], outputCols=['AGE2', 'GENDER2', 'RACE2', 'DRIVING_EXPERIENCE2', 'VEHICLE_YEAR2', 'VEHICLE_TYPE2','POSTAL_CODE2'])
+# Input list for scaling
+inputs = ['VEHICLE_OWNERSHIP','CHILDREN','ANNUAL_MILEAGE','SPEEDING_VIOLATIONS','DUIS','label']
+# We scale our inputs
+assembler1 = VectorAssembler(inputCols=inputs, outputCol="features_scaled1",handleInvalid="keep")
+scaler = MinMaxScaler(inputCol="features_scaled1", outputCol="features_scaled")
+# We create a second assembler for the encoded columns.
+assembler2 = VectorAssembler(inputCols=['AGE2', 'GENDER2', 'RACE2', 'DRIVING_EXPERIENCE2','VEHICLE_YEAR2', 'VEHICLE_TYPE2','POSTAL_CODE2','features_scaled'], outputCol="features",handleInvalid="keep")
+# Create stages list
+myStages = [assembler1, scaler, idx,ohe, assembler2,lr]
+# Set up the pipeline
+pipeline = Pipeline(stages= myStages)
+# We fit the model using the training data.
+pModel = pipeline.fit(trainDF)
+# We transform the data.
+trainingPred = pModel.transform(trainDF)
+# # We select the actual label, probability and predictions
+trainingPred.select('label','probability','prediction').show()
+# We now repartition the test data and break them down into 10 different files and write it to a csv file.
+testData = testDF.repartition(10)
+evaluation2 =MulticlassClassificationEvaluator(labelCol="label",predictionCol="prediction", metricName="accuracy")
+accuracy = evaluation2.evaluate(trainingPred )
+print("ACCURACY :")
+print(accuracy)
+#Create a directory
+testData.write.format("CSV").option("header",True).save("/home/sri2/spark-3.2.1-bin-hadoop3.2/bin/cAR_iNSURANCE_pREDICTION")
+# Source
+sourceStream=spark.readStream.format("csv").option("header",True).schema(schema).option("ignoreLeadingWhiteSpace",True).option("mode","dropMalformed").option("maxFilesPerTrigger",1).load("/home/sri2/spark-3.2.1-bin-hadoop3.2/bin/cAR_iNSURANCE_pREDICTION").withColumnRenamed("PAST_ACCIDENTS","label") 
+streamingHeart=pModel.transform(sourceStream)
+activityQuery = streamingHeart.writeStream.queryName("activity_counts100").format("memory").outputMode("append").start()
+spark.sql('select val1,val2,val1/val2 from (select count(*) as val1 from activity_Counts100 where label==prediction),(select count(*) as val2 from activity_Counts100)').show()
